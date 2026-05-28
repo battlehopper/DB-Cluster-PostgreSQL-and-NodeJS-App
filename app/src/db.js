@@ -1,9 +1,12 @@
 'use strict';
 
+// Instrumentacao Datadog deve carregar ANTES do modulo pg
+require('./tracing');
+
 const { Pool } = require('pg');
 
 const pool = new Pool({
-  host: process.env.PGHOST || 'haproxy-db',
+  host: process.env.PGHOST || 'pg-primary',
   port: Number(process.env.PGPORT || 5432),
   database: process.env.PGDATABASE || 'movida',
   user: process.env.PGUSER || 'movida_app',
@@ -13,10 +16,29 @@ const pool = new Pool({
   connectionTimeoutMillis: 5000,
 });
 
+// Protocolo simples: comentarios DBM (dddbs/ddps) aparecem no pg_stat_statements
+function withSimpleQueryMode(text, values) {
+  if (typeof text === 'string') {
+    return { text, values, queryMode: 'simple' };
+  }
+  if (text && typeof text === 'object') {
+    return { ...text, queryMode: text.queryMode || 'simple' };
+  }
+  return text;
+}
+
+const originalQuery = pool.query.bind(pool);
+pool.query = (text, values, callback) => {
+  if (typeof callback === 'function') {
+    return originalQuery(withSimpleQueryMode(text, values), callback);
+  }
+  return originalQuery(withSimpleQueryMode(text, values));
+};
+
 async function ping() {
   const client = await pool.connect();
   try {
-    await client.query('SELECT 1');
+    await client.query({ text: 'SELECT 1', queryMode: 'simple' });
   } finally {
     client.release();
   }

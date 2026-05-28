@@ -168,7 +168,9 @@ Personalize os nomes em `.env` (`DD_SERVICE_PG_LB`, `DD_SERVICE_PG_PRIMARY`, etc
 | Recurso | Requisito | Onde ver |
 |---------|-----------|----------|
 | **Schema** | Agent **7.54+** + `collect_schemas.enabled: true` | DBM → **movida-pg-primary** → Schema |
-| **Calling Services** | `DD_DBM_PROPAGATION_MODE=full` + `tracer.use('pg', { dbmPropagationMode: 'full' })` + tráfego via API | DBM → **movida-pg-primary** apenas (não na replica) |
+| **Calling Services** | `DD_DBM_PROPAGATION_MODE=full` + `tracer.use('pg')` + `PGHOST=pg-primary` (hostname = DBM) + protocolo `simple` no `pg` | DBM → **movida-pg-primary** apenas (não na replica) |
+
+> **Nota:** `pg_stat_statements` costuma **remover comentários SQL** (`dddbs`/`ddps`). Por isso o teste `LIKE '%dddbs%'` pode retornar 0 linhas mesmo com propagação OK. Use Calling Services no UI após tráfego.
 
 Após `git pull` e rebuild:
 

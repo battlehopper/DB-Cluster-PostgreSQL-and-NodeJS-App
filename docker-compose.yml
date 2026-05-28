@@ -119,7 +119,9 @@ services:
       <<: *ust-env
       INSTANCE_ID: api-1
       PORT: 3000
-      PGHOST: haproxy-db
+      # Conexao direta ao primary: hostname alinhado com DBM reported_hostname (Calling Services)
+      # HAProxy (haproxy-db) permanece no lab para demo TCP/LB na porta 5432 do host
+      PGHOST: pg-primary
       PGPORT: 5432
       PGDATABASE: movida
       PGUSER: movida_app
