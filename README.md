@@ -98,7 +98,7 @@ chmod +x scripts/compose.sh
 ./scripts/compose.sh logs -f --tail=50
 ```
 
-> Se `docker compose` mostrar apenas o help do Docker, use **`./scripts/compose.sh`** — ele detecta o plugin v2 ou o binário `docker-compose` v1.
+> Se `docker compose` não existir na EC2, **`./scripts/compose.sh` instala automaticamente** o binário em `bin/docker-compose` (sem precisar de plugin). Alternativa: `./scripts/install-docker-compose.sh`
 
 A replica pode levar **1–2 minutos** no primeiro `pg_basebackup`.
 
@@ -266,7 +266,8 @@ Para demo com **ALB real da AWS** apontando para a EC2:
 
 | Sintoma | Ação |
 |---------|------|
-| Tela de help do `docker` (sem subcomando) | Use `./scripts/compose.sh` em vez de `docker compose`; instale o plugin: `sudo dnf install -y docker-compose-plugin` |
+| `ERRO: Docker Compose nao encontrado` | Rode `./scripts/install-docker-compose.sh` ou apenas `./scripts/compose.sh` (baixa o binário em `bin/` na 1ª execução) |
+| Tela de help do `docker` (sem subcomando) | Não use `docker compose` direto; use sempre `./scripts/compose.sh` |
 | `api-*` em restart loop | Aguarde `pg-primary` healthy; verifique `./scripts/compose.sh logs haproxy-db` |
 | Replica não sobe | `docker compose logs pg-replica` — primeiro boot demora; confira senha `REPLICATION_PASSWORD` |
 | APM sem traces | Confirme `DD_API_KEY`, porta 8126, `DD_AGENT_HOST=datadog-agent` nos containers api |
