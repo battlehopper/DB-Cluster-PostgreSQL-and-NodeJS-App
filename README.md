@@ -273,6 +273,8 @@ Para demo com **ALB real da AWS** apontando para a EC2:
 | APM sem traces | Confirme `DD_API_KEY`, porta 8126, `DD_AGENT_HOST=datadog-agent` nos containers api |
 | Postgres check NO DATA | Verifique usuário/senha em `.env` e conectividade agent → `pg-primary` |
 | DBM: `pg_stat_statements is not created` | Rode `git pull && ./scripts/enable-pg-stat-statements.sh` ou recrie volumes com `./scripts/compose.sh down -v` |
+| DBM replica: `pg_stat_statements not loaded` | Replica precisa de `--build` (`enable-pg-stat-statements.sh` ja faz). Valide: `docker exec pg-replica psql -U postgres -d movida -c "SHOW shared_preload_libraries;"` |
+| DBM primary: `Unable to fetch wraparound data` | Geralmente benigno em lab/demo; grants `pg_monitor` no init. Atualize após 15 min ou ignore se Queries/APM estiverem OK |
 
 ---
 
