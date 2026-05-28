@@ -19,6 +19,9 @@ max_wal_senders = 10
 max_replication_slots = 10
 hot_standby = on
 listen_addresses = '*'
+shared_preload_libraries = 'pg_stat_statements'
+pg_stat_statements.track = all
+pg_stat_statements.max = 10000
 EOF
 
 echo "host replication replicator 0.0.0.0/0 scram-sha-256" >> "${PGDATA}/pg_hba.conf"

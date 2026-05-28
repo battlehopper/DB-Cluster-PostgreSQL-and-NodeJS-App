@@ -14,4 +14,7 @@ if [ ! -s "${PGDATA}/PG_VERSION" ]; then
   pg_basebackup -h pg-primary -D "${PGDATA}" -U replicator -v -P -R -X stream -c fast
 fi
 
-exec docker-entrypoint.sh postgres
+exec docker-entrypoint.sh postgres \
+  -c shared_preload_libraries=pg_stat_statements \
+  -c pg_stat_statements.track=all \
+  -c pg_stat_statements.max=10000

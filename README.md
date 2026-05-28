@@ -272,6 +272,7 @@ Para demo com **ALB real da AWS** apontando para a EC2:
 | Replica não sobe | `docker compose logs pg-replica` — primeiro boot demora; confira senha `REPLICATION_PASSWORD` |
 | APM sem traces | Confirme `DD_API_KEY`, porta 8126, `DD_AGENT_HOST=datadog-agent` nos containers api |
 | Postgres check NO DATA | Verifique usuário/senha em `.env` e conectividade agent → `pg-primary` |
+| DBM: `pg_stat_statements is not created` | Rode `git pull && ./scripts/enable-pg-stat-statements.sh` ou recrie volumes com `./scripts/compose.sh down -v` |
 
 ---
 
