@@ -25,14 +25,25 @@ instances:
           - r
           - i
 
-  # No PRIMARY — metricas de no + replication (sem duplicar query samples do LB)
+  # No PRIMARY — vacuum/wraparound + replication (sem duplicar queries do endpoint LB)
   - host: pg-primary
     port: 5432
     username: "%%env_POSTGRES_USER%%"
     password: "%%env_POSTGRES_PASSWORD%%"
     dbname: movida
     reported_hostname: movida-pg-primary
-    dbm: false
+    dbm: true
+    query_metrics:
+      enabled: false
+    query_samples:
+      enabled: false
+    collect_schemas:
+      enabled: false
+    relations:
+      - relation_regex: '.*'
+        relkind:
+          - r
+          - i
     tags:
       - "env:%%env_DD_ENV%%"
       - "service:%%env_DD_SERVICE_PG_PRIMARY%%"

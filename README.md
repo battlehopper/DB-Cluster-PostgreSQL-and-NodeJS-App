@@ -159,8 +159,13 @@ Personalize os nomes em `.env` (`DD_SERVICE_PG_LB`, `DD_SERVICE_PG_PRIMARY`, etc
 
 ### Database Monitoring (DBM)
 
-- **Endpoint LB:** `movida-pg-haproxy` — queries, schema, Calling Services (`movida-reservas-api`)
-- **Nós:** `movida-pg-primary` / `movida-pg-replica` — replication e saúde do cluster
+| Onde no DBM (us5) | Host | O que ver |
+|-------------------|------|-----------|
+| Queries, Schema, Calling Services (via LB) | **movida-pg-haproxy** | Tráfego da API (`PGHOST=haproxy-db`) |
+| Calling Services (também pode aparecer) | **movida-pg-primary** | Queries executam no nó writer |
+| Vacuums / wraparound | **movida-pg-primary** | Saúde operacional do nó |
+| Replication lag | **movida-pg-primary** | Custom metric |
+| Standby | **movida-pg-replica** | Sem Calling Services (esperado) |
 - Em **APM → Traces**, use **View in DBM** no host do load balancer
 
 ### Schema Explorer + Calling Services
