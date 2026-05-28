@@ -92,10 +92,13 @@ nano .env   # defina DD_API_KEY e senhas
 ### 4. Subir o ecossistema
 
 ```bash
-docker compose up -d --build
-docker compose ps
-docker compose logs -f --tail=50
+chmod +x scripts/compose.sh
+./scripts/compose.sh up -d --build
+./scripts/compose.sh ps
+./scripts/compose.sh logs -f --tail=50
 ```
+
+> Se `docker compose` mostrar apenas o help do Docker, use **`./scripts/compose.sh`** — ele detecta o plugin v2 ou o binário `docker-compose` v1.
 
 A replica pode levar **1–2 minutos** no primeiro `pg_basebackup`.
 
@@ -128,22 +131,41 @@ docker compose --profile loadgen up -d loadgen
 
 ---
 
+## Unified Service Tagging (UST) + DBM
+
+Seguimos a [documentação oficial de UST](https://docs.datadoghq.com/getting_started/tagging/unified_service_tagging/?tab=docker): tags reservadas **`env`**, **`service`** e **`version`** em todos os containers.
+
+| Componente | `service` (UST) | Papel no DBM |
+|------------|-----------------|--------------|
+| `movida-reservas-api` | API Node (APM) | Origem das queries; `DD_DBM_PROPAGATION_MODE=full` |
+| `movida-pg-haproxy` | HAProxy (LB do banco) | Nome do load balancer que as apps usam (`PGHOST`) |
+| `movida-pg-primary` | PostgreSQL primary | Nó writer — host real no DBM |
+| `movida-pg-replica` | PostgreSQL replica | Nó reader — host real no DBM |
+| `movida-app-alb` | Nginx (ALB HTTP) | LB da camada de aplicação |
+
+Cada container expõe **labels Docker** (`com.datadoghq.tags.*`) e, onde aplicável, variáveis `DD_ENV` / `DD_SERVICE` / `DD_VERSION`. Os checks PostgreSQL usam `dbm: true`, `reported_hostname` e a tag **`db_load_balancer:movida-pg-haproxy`** para o DBM correlacionar o endpoint do LB com cada nó do cluster.
+
+Personalize os nomes em `.env` (`DD_SERVICE_PG_LB`, `DD_SERVICE_PG_PRIMARY`, etc.).
+
+---
+
 ## O que observar no Datadog
 
 ### APM (aplicação Node.js)
 
 - **Service:** `movida-reservas-api`
 - **Env:** `movida-lab` (configurável via `DD_ENV`)
-- Spans de Express + queries `pg` instrumentadas pelo `dd-trace`
+- Spans de Express + queries `pg` com propagação DBM (`dbmPropagationMode: full`)
+
+### Database Monitoring (DBM)
+
+- Hosts **`movida-pg-primary`** e **`movida-pg-replica`** com tag `db_load_balancer:movida-pg-haproxy`
+- Em **APM → Traces**, abra um trace da API e use o link **View in DBM** para ver a query no nó correto
+- Filtre DBM por `service:movida-pg-primary` ou `service:movida-pg-haproxy`
 
 ### Integração PostgreSQL
 
-Checks configurados em `datadog/conf.d/postgres.d/conf.yaml` para:
-
-- `pg-primary` (role: primary)
-- `pg-replica` (role: replica)
-
-Métricas úteis: conexões, deadlocks, replication lag, tamanho de tabelas.
+Checks em `datadog/conf.d/postgres.d/conf.yaml` com `dbm: true` para primary e replica.
 
 ### Infraestrutura / Containers
 
@@ -166,6 +188,9 @@ Copie `.env.example` para `.env`:
 |----------|-----------|
 | `DD_API_KEY` | **Obrigatória** — chave da organização Datadog |
 | `DD_SITE` | Tenant **us5** (default: `us5.datadoghq.com`) |
+| `DD_SERVICE_PG_LB` | Nome UST do load balancer PostgreSQL (default: `movida-pg-haproxy`) |
+| `DD_SERVICE_PG_PRIMARY` | Nome UST do nó primary |
+| `DD_SERVICE_PG_REPLICA` | Nome UST do nó replica |
 | `DD_ENV` | Tag de ambiente (ex: `movida-lab`) |
 | `APP_ALB_PORT` | Porta HTTP exposta (default 8080) |
 | `DB_LB_PORT` | Porta write PostgreSQL via HAProxy |
@@ -175,11 +200,14 @@ Copie `.env.example` para `.env`:
 ## Comandos úteis
 
 ```bash
+# Sempre preferir o wrapper (evita erro "docker: unknown command: compose")
+./scripts/compose.sh up -d --build
+
 # Rebuild apenas das APIs
-docker compose up -d --build api-1 api-2
+./scripts/compose.sh up -d --build api-1 api-2
 
 # Logs do primary
-docker compose logs -f pg-primary
+./scripts/compose.sh logs -f pg-primary
 
 # Entrar no primary
 docker exec -it pg-primary psql -U postgres -d movida
@@ -188,10 +216,10 @@ docker exec -it pg-primary psql -U postgres -d movida
 docker exec -it pg-primary psql -U postgres -c "SELECT * FROM pg_stat_replication;"
 
 # Parar tudo
-docker compose down
+./scripts/compose.sh down
 
 # Parar e apagar volumes (reset completo)
-docker compose down -v
+./scripts/compose.sh down -v
 ```
 
 ---
@@ -238,7 +266,8 @@ Para demo com **ALB real da AWS** apontando para a EC2:
 
 | Sintoma | Ação |
 |---------|------|
-| `api-*` em restart loop | Aguarde `pg-primary` healthy; verifique `docker compose logs haproxy-db` |
+| Tela de help do `docker` (sem subcomando) | Use `./scripts/compose.sh` em vez de `docker compose`; instale o plugin: `sudo dnf install -y docker-compose-plugin` |
+| `api-*` em restart loop | Aguarde `pg-primary` healthy; verifique `./scripts/compose.sh logs haproxy-db` |
 | Replica não sobe | `docker compose logs pg-replica` — primeiro boot demora; confira senha `REPLICATION_PASSWORD` |
 | APM sem traces | Confirme `DD_API_KEY`, porta 8126, `DD_AGENT_HOST=datadog-agent` nos containers api |
 | Postgres check NO DATA | Verifique usuário/senha em `.env` e conectividade agent → `pg-primary` |

@@ -1,15 +1,22 @@
 init_config:
 
 instances:
+  # Primary — service UST distinto para DBM identificar o no
   - host: pg-primary
     port: 5432
     username: "%%env_POSTGRES_USER%%"
     password: "%%env_POSTGRES_PASSWORD%%"
     dbname: movida
+    reported_hostname: movida-pg-primary
+    dbm: true
     tags:
-      - env:movida-lab
-      - role:primary
-      - cluster:movida-pg
+      - "env:%%env_DD_ENV%%"
+      - "service:%%env_DD_SERVICE_PG_PRIMARY%%"
+      - "version:%%env_DD_VERSION%%"
+      - "db_cluster:movida-pg"
+      - "db_node:primary"
+      - "db_role:writer"
+      - "db_load_balancer:%%env_DD_SERVICE_PG_LB%%"
     relations:
       - relation_regex: '.*'
         relkind:
@@ -24,15 +31,22 @@ instances:
         tags:
           - query:replication_lag
 
+  # Replica — service UST distinto; DBM correlaciona com o LB via tag db_load_balancer
   - host: pg-replica
     port: 5432
     username: "%%env_POSTGRES_USER%%"
     password: "%%env_POSTGRES_PASSWORD%%"
     dbname: movida
+    reported_hostname: movida-pg-replica
+    dbm: true
     tags:
-      - env:movida-lab
-      - role:replica
-      - cluster:movida-pg
+      - "env:%%env_DD_ENV%%"
+      - "service:%%env_DD_SERVICE_PG_REPLICA%%"
+      - "version:%%env_DD_VERSION%%"
+      - "db_cluster:movida-pg"
+      - "db_node:replica"
+      - "db_role:reader"
+      - "db_load_balancer:%%env_DD_SERVICE_PG_LB%%"
     relations:
       - relation_regex: '.*'
         relkind:

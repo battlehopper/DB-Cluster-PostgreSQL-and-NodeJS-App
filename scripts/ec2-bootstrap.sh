@@ -8,7 +8,7 @@ INSTALL_DIR="${INSTALL_DIR:-/opt/movida-datadog-lab}"
 echo "==> Instalando Docker..."
 if command -v dnf &>/dev/null; then
   sudo dnf update -y
-  sudo dnf install -y docker git
+  sudo dnf install -y docker git docker-compose-plugin 2>/dev/null || sudo dnf install -y docker git
   sudo systemctl enable --now docker
   sudo usermod -aG docker "${USER}"
 elif command -v apt-get &>/dev/null; then
@@ -51,5 +51,5 @@ echo "Bootstrap concluido."
 echo "Proximos passos:"
 echo "  1) newgrp docker   # ou faca logout/login"
 echo "  2) nano ${INSTALL_DIR}/.env"
-echo "  3) cd ${INSTALL_DIR} && docker compose up -d --build"
+echo "  3) cd ${INSTALL_DIR} && ./scripts/compose.sh up -d --build"
 echo "  4) ./scripts/smoke-test.sh"
