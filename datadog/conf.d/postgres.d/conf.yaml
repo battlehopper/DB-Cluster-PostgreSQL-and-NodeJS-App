@@ -1,7 +1,6 @@
 init_config:
 
 instances:
-  # Primary — service UST distinto para DBM identificar o no
   - host: pg-primary
     port: 5432
     username: "%%env_POSTGRES_USER%%"
@@ -9,6 +8,8 @@ instances:
     dbname: movida
     reported_hostname: movida-pg-primary
     dbm: true
+    collect_schemas:
+      enabled: true
     tags:
       - "env:%%env_DD_ENV%%"
       - "service:%%env_DD_SERVICE_PG_PRIMARY%%"
@@ -32,7 +33,6 @@ instances:
         tags:
           - query:replication_lag
 
-  # Replica — service UST distinto; DBM correlaciona com o LB via tag db_load_balancer
   - host: pg-replica
     port: 5432
     username: "%%env_POSTGRES_USER%%"
@@ -40,6 +40,8 @@ instances:
     dbname: movida
     reported_hostname: movida-pg-replica
     dbm: true
+    collect_schemas:
+      enabled: true
     tags:
       - "env:%%env_DD_ENV%%"
       - "service:%%env_DD_SERVICE_PG_REPLICA%%"

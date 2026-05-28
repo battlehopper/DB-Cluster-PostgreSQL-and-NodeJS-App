@@ -194,7 +194,7 @@ services:
 
   # --- Observabilidade (Datadog Agent) ---
   datadog-agent:
-    image: gcr.io/datadoghq/agent:7
+    image: gcr.io/datadoghq/agent:7.60.1
     container_name: datadog-agent
     pid: host
     environment:

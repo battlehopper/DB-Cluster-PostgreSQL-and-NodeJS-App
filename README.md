@@ -163,6 +163,22 @@ Personalize os nomes em `.env` (`DD_SERVICE_PG_LB`, `DD_SERVICE_PG_PRIMARY`, etc
 - Em **APM → Traces**, abra um trace da API e use o link **View in DBM** para ver a query no nó correto
 - Filtre DBM por `service:movida-pg-primary` ou `service:movida-pg-haproxy`
 
+### Schema Explorer + Calling Services
+
+| Recurso | Requisito | Onde ver |
+|---------|-----------|----------|
+| **Schema** | Agent **7.54+** + `collect_schemas.enabled: true` | DBM → **movida-pg-primary** → Schema |
+| **Calling Services** | `DD_DBM_PROPAGATION_MODE=full` + `tracer.use('pg', { dbmPropagationMode: 'full' })` + tráfego via API | DBM → **movida-pg-primary** apenas (não na replica) |
+
+Após `git pull` e rebuild:
+
+```bash
+./scripts/compose.sh up -d --build api-1 api-2 datadog-agent
+./scripts/verify-dbm-apm-link.sh
+```
+
+Calling Services **não aparece na replica** — a API conecta só no primary via HAProxy:5432.
+
 ### Integração PostgreSQL
 
 Checks em `datadog/conf.d/postgres.d/conf.yaml` com `dbm: true` para primary e replica.
