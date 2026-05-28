@@ -6,7 +6,7 @@ require('./tracing');
 const { Pool } = require('pg');
 
 const pool = new Pool({
-  host: process.env.PGHOST || 'pg-primary',
+  host: process.env.PGHOST || 'haproxy-db',
   port: Number(process.env.PGPORT || 5432),
   database: process.env.PGDATABASE || 'movida',
   user: process.env.PGUSER || 'movida_app',

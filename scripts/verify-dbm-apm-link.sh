@@ -43,7 +43,7 @@ docker exec pg-primary psql -U postgres -d movida -c \
 
 echo ""
 echo "--- Interpretacao ---"
-echo "1) Calling Services: verifique APENAS em movida-pg-primary (nao na replica)."
-echo "2) Host da API deve ser pg-primary (mesmo hostname do DBM reported_hostname)."
-echo "3) Aguarde 5-10 min apos rebuild: ./scripts/compose.sh up -d --build api-1 api-2"
-echo "4) Schema: Agent 7.54+ com collect_schemas — aguarde ~15 min apos restart do agent."
+echo "1) Calling Services + Schema: host DBM = movida-pg-haproxy (endpoint do LB, nao o primary)."
+echo "2) API usa PGHOST=haproxy-db; comentario SQL deve ter ddh='haproxy-db'."
+echo "3) Nos pg-primary / pg-replica: metricas de cluster/replication (sem Calling Services)."
+echo "4) Aguarde 5-10 min apos: ./scripts/compose.sh up -d --build api-1 api-2 datadog-agent"

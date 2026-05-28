@@ -138,9 +138,9 @@ Seguimos a [documentação oficial de UST](https://docs.datadoghq.com/getting_st
 | Componente | `service` (UST) | Papel no DBM |
 |------------|-----------------|--------------|
 | `movida-reservas-api` | API Node (APM) | Origem das queries; `DD_DBM_PROPAGATION_MODE=full` |
-| `movida-pg-haproxy` | HAProxy (LB do banco) | Nome do load balancer que as apps usam (`PGHOST`) |
-| `movida-pg-primary` | PostgreSQL primary | Nó writer — host real no DBM |
-| `movida-pg-replica` | PostgreSQL replica | Nó reader — host real no DBM |
+| `movida-pg-haproxy` | HAProxy (LB do banco) | **Endpoint das apps** (`PGHOST=haproxy-db`) — Queries, Schema, Calling Services |
+| `movida-pg-primary` | PostgreSQL primary | Nó writer — replication lag e saúde do cluster |
+| `movida-pg-replica` | PostgreSQL replica | Nó standby — saúde da réplica |
 | `movida-app-alb` | Nginx (ALB HTTP) | LB da camada de aplicação |
 
 Cada container expõe **labels Docker** (`com.datadoghq.tags.*`) e, onde aplicável, variáveis `DD_ENV` / `DD_SERVICE` / `DD_VERSION`. Os checks PostgreSQL usam `dbm: true`, `reported_hostname` e a tag **`db_load_balancer:movida-pg-haproxy`** para o DBM correlacionar o endpoint do LB com cada nó do cluster.
@@ -159,18 +159,20 @@ Personalize os nomes em `.env` (`DD_SERVICE_PG_LB`, `DD_SERVICE_PG_PRIMARY`, etc
 
 ### Database Monitoring (DBM)
 
-- Hosts **`movida-pg-primary`** e **`movida-pg-replica`** com tag `db_load_balancer:movida-pg-haproxy`
-- Em **APM → Traces**, abra um trace da API e use o link **View in DBM** para ver a query no nó correto
-- Filtre DBM por `service:movida-pg-primary` ou `service:movida-pg-haproxy`
+- **Endpoint LB:** `movida-pg-haproxy` — queries, schema, Calling Services (`movida-reservas-api`)
+- **Nós:** `movida-pg-primary` / `movida-pg-replica` — replication e saúde do cluster
+- Em **APM → Traces**, use **View in DBM** no host do load balancer
 
 ### Schema Explorer + Calling Services
 
 | Recurso | Requisito | Onde ver |
 |---------|-----------|----------|
 | **Schema** | Agent **7.54+** + `collect_schemas.enabled: true` | DBM → **movida-pg-primary** → Schema |
-| **Calling Services** | `DD_DBM_PROPAGATION_MODE=full` + `tracer.use('pg')` + `PGHOST=pg-primary` (hostname = DBM) + protocolo `simple` no `pg` | DBM → **movida-pg-primary** apenas (não na replica) |
+| **Calling Services** | Apps em `PGHOST=haproxy-db` + DBM no host **`movida-pg-haproxy`** + `DD_DBM_PROPAGATION_MODE=full` + `queryMode: simple` | DBM → host do **LB**, não no primary |
 
-> **Nota:** `pg_stat_statements` costuma **remover comentários SQL** (`dddbs`/`ddps`). Por isso o teste `LIKE '%dddbs%'` pode retornar 0 linhas mesmo com propagação OK. Use Calling Services no UI após tráfego.
+> **Arquitetura Movida:** a API **nunca** conecta pelo nome `pg-primary`; usa o **endpoint do load balancer**. O Agent coleta DBM nesse endpoint (`haproxy-db` / `movida-pg-haproxy`) e monitora os nós (`pg-primary`, `pg-replica`) separadamente para replication/cluster.
+
+> **Nota:** `pg_stat_statements` pode normalizar comentários `dddbs`/`ddps`; use o script `verify-dbm-apm-link.sh` e o UI em **movida-pg-haproxy**.
 
 Após `git pull` e rebuild:
 
