@@ -1,0 +1,210 @@
+# Ecossistema Movida Lab: PostgreSQL Cluster + Node.js + ALB simulado + Datadog Agent
+# Uso: cp .env.example .env && docker compose up -d --build
+
+name: movida-datadog-lab
+
+services:
+  # --- Camada de Banco (Cluster PostgreSQL) ---
+  pg-primary:
+    image: postgres:16-alpine
+    container_name: pg-primary
+    hostname: pg-primary
+    environment:
+      POSTGRES_DB: movida
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres_admin}
+      REPLICATION_PASSWORD: ${REPLICATION_PASSWORD:-replica_secret}
+      APP_DB_PASSWORD: ${APP_DB_PASSWORD:-movida_secret}
+    volumes:
+      - pg-primary-data:/var/lib/postgresql/data
+      - ./postgres/primary/init:/docker-entrypoint-initdb.d:ro
+    networks:
+      - movida-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d movida"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    labels:
+      com.datadoghq.ad.logs: '[{"source":"postgresql","service":"movida-pg-primary"}]'
+
+  pg-replica:
+    build: ./postgres/replica
+    container_name: pg-replica
+    hostname: pg-replica
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres_admin}
+      REPLICATION_PASSWORD: ${REPLICATION_PASSWORD:-replica_secret}
+      PGDATA: /var/lib/postgresql/data
+    volumes:
+      - pg-replica-data:/var/lib/postgresql/data
+    depends_on:
+      pg-primary:
+        condition: service_healthy
+    networks:
+      - movida-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
+      interval: 5s
+      timeout: 5s
+      retries: 15
+      start_period: 60s
+    labels:
+      com.datadoghq.ad.logs: '[{"source":"postgresql","service":"movida-pg-replica"}]'
+
+  # HAProxy simula NLB/ALB TCP para PostgreSQL (endpoint unico para apps)
+  haproxy-db:
+    image: haproxy:2.9-alpine
+    container_name: haproxy-db
+    volumes:
+      - ./haproxy/haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
+    ports:
+      - "${DB_LB_PORT:-5432}:5432"
+      - "${DB_READ_LB_PORT:-5433}:5433"
+    depends_on:
+      pg-primary:
+        condition: service_healthy
+    networks:
+      - movida-net
+    healthcheck:
+      test: ["CMD", "haproxy", "-c", "-f", "/usr/local/etc/haproxy/haproxy.cfg"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # --- Camada de Aplicacao (Node.js) ---
+  api-1:
+    build: ./app
+    container_name: api-1
+    hostname: api-1
+    environment: &api_env
+      INSTANCE_ID: api-1
+      PORT: 3000
+      PGHOST: haproxy-db
+      PGPORT: 5432
+      PGDATABASE: movida
+      PGUSER: movida_app
+      PGPASSWORD: ${APP_DB_PASSWORD:-movida_secret}
+      DD_AGENT_HOST: datadog-agent
+      DD_TRACE_AGENT_PORT: 8126
+      DD_ENV: ${DD_ENV:-movida-lab}
+      DD_SERVICE: movida-reservas-api
+      DD_VERSION: ${DD_VERSION:-1.0.0}
+      DD_LOGS_INJECTION: "true"
+      DD_RUNTIME_METRICS_ENABLED: "true"
+      DD_PROFILING_ENABLED: ${DD_PROFILING_ENABLED:-false}
+    depends_on:
+      haproxy-db:
+        condition: service_started
+      datadog-agent:
+        condition: service_started
+    networks:
+      - movida-net
+    labels:
+      com.datadoghq.ad.logs: '[{"source":"nodejs","service":"movida-reservas-api"}]'
+      com.datadoghq.tags.env: movida-lab
+      com.datadoghq.tags.service: movida-reservas-api
+
+  api-2:
+    build: ./app
+    container_name: api-2
+    hostname: api-2
+    environment:
+      <<: *api_env
+      INSTANCE_ID: api-2
+    depends_on:
+      haproxy-db:
+        condition: service_started
+      datadog-agent:
+        condition: service_started
+    networks:
+      - movida-net
+    labels:
+      com.datadoghq.ad.logs: '[{"source":"nodejs","service":"movida-reservas-api"}]'
+      com.datadoghq.tags.env: movida-lab
+      com.datadoghq.tags.service: movida-reservas-api
+
+  # Nginx simula Application Load Balancer (HTTP) na frente das APIs
+  alb-app:
+    image: nginx:1.27-alpine
+    container_name: alb-app
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    ports:
+      - "${APP_ALB_PORT:-8080}:80"
+    depends_on:
+      - api-1
+      - api-2
+    networks:
+      - movida-net
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # --- Observabilidade (Datadog Agent) ---
+  datadog-agent:
+    image: gcr.io/datadoghq/agent:7
+    container_name: datadog-agent
+    pid: host
+    environment:
+      DD_API_KEY: ${DD_API_KEY:?Defina DD_API_KEY no arquivo .env}
+      DD_SITE: ${DD_SITE:-us5.datadoghq.com}
+      DD_HOSTNAME: ${DD_HOSTNAME:-movida-ec2-lab}
+      DD_ENV: ${DD_ENV:-movida-lab}
+      DD_TAGS: "project:db-cluster-postgresql-nodejs customer:movida"
+      DD_APM_ENABLED: "true"
+      DD_APM_NON_LOCAL_TRAFFIC: "true"
+      DD_LOGS_ENABLED: "true"
+      DD_LOGS_CONFIG_CONTAINER_COLLECT_ALL: "true"
+      DD_CONTAINER_EXCLUDE: "name:datadog-agent"
+      DD_PROCESS_AGENT_ENABLED: "true"
+      DD_DOGSTATSD_NON_LOCAL_TRAFFIC: "true"
+      DD_AC_EXCLUDE: "name:datadog-agent"
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres_admin}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /proc/:/host/proc/:ro
+      - /sys/fs/cgroup/:/host/sys/fs/cgroup:ro
+      - ./datadog/datadog.yaml:/etc/datadog-agent/datadog.yaml:ro
+      - ./datadog/conf.d/postgres.d:/etc/datadog-agent/conf.d/postgres.d:ro
+    networks:
+      - movida-net
+    ports:
+      - "8126:8126"
+      - "8125:8125/udp"
+
+  # Gerador de trafego sintetico (opcional, profile: loadgen)
+  loadgen:
+    image: curlimages/curl:8.11.1
+    container_name: loadgen
+    profiles: ["loadgen"]
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        echo "Gerando trafego contra ALB (alb-app:80)..."
+        while true; do
+          curl -sf "http://alb-app/health" > /dev/null
+          curl -sf "http://alb-app/api/status" > /dev/null
+          curl -sf "http://alb-app/api/reservas" > /dev/null
+          curl -sf -X POST "http://alb-app/api/reservas" \
+            -H "Content-Type: application/json" \
+            -d "{\"cliente\":\"Cliente Demo\",\"veiculo\":\"SUV\",\"dias\":3}" > /dev/null
+          curl -sf "http://alb-app/api/metrics/load" > /dev/null
+          sleep 2
+        done
+    depends_on:
+      - alb-app
+    networks:
+      - movida-net
+
+networks:
+  movida-net:
+    driver: bridge
+
+volumes:
+  pg-primary-data:
+  pg-replica-data:

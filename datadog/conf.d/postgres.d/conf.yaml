@@ -1,0 +1,40 @@
+init_config:
+
+instances:
+  - host: pg-primary
+    port: 5432
+    username: "%%env_POSTGRES_USER%%"
+    password: "%%env_POSTGRES_PASSWORD%%"
+    dbname: movida
+    tags:
+      - env:movida-lab
+      - role:primary
+      - cluster:movida-pg
+    relations:
+      - relation_regex: '.*'
+        relkind:
+          - r
+          - i
+    custom_queries:
+      - metric_suffix: replication.lag_bytes
+        query: SELECT COALESCE(pg_wal_lsn_diff(pg_current_wal_lsn(), replay_lsn), 0) AS lag FROM pg_stat_replication LIMIT 1;
+        columns:
+          - name: lag
+            type: gauge
+        tags:
+          - query:replication_lag
+
+  - host: pg-replica
+    port: 5432
+    username: "%%env_POSTGRES_USER%%"
+    password: "%%env_POSTGRES_PASSWORD%%"
+    dbname: movida
+    tags:
+      - env:movida-lab
+      - role:replica
+      - cluster:movida-pg
+    relations:
+      - relation_regex: '.*'
+        relkind:
+          - r
+          - i

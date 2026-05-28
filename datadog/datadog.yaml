@@ -1,0 +1,27 @@
+# Config complementar do Agent. API key e site vêm das variáveis DD_API_KEY e DD_SITE.
+
+hostname: movida-ec2-lab
+
+tags:
+  - project:db-cluster-postgresql-nodejs
+  - customer:movida
+  - env:movida-lab
+
+logs_enabled: true
+
+apm_config:
+  enabled: true
+  apm_non_local_traffic: true
+
+process_config:
+  process_collection:
+    enabled: true
+
+dogstatsd_non_local_traffic: true
+
+listeners:
+  - name: docker
+
+config_providers:
+  - name: docker
+    polling: true
