@@ -110,7 +110,25 @@ A replica pode levar **1–2 minutos** no primeiro `pg_basebackup`.
 curl http://$(curl -s http://169.254.169.254/latest/meta-data/local-ipv4):8080/health
 ```
 
-### 6. (Opcional) Gerar tráfego contínuo
+### 6. (Opcional) Tráfego contínuo para DBM/APM (a cada 1 min)
+
+**Na EC2 (host):**
+```bash
+chmod +x scripts/continuous-traffic.sh
+./scripts/continuous-traffic.sh
+# ou em background:
+nohup ./scripts/continuous-traffic.sh >> /var/log/movida-traffic.log 2>&1 &
+```
+
+**Via Docker (recomendado):**
+```bash
+./scripts/compose.sh --profile traffic up -d traffic-loop
+./scripts/compose.sh logs -f traffic-loop
+```
+
+Variáveis opcionais: `INTERVAL_SECONDS=60`, `BASE_URL=http://localhost:8080`, `TRAFFIC_INTERVAL_SECONDS=60`.
+
+### 7. (Opcional) Gerar tráfego sintético intenso
 
 ```bash
 docker compose --profile loadgen up -d loadgen

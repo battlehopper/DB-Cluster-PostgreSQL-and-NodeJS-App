@@ -233,6 +233,24 @@ services:
       <<: *ust-labels
       com.datadoghq.tags.service: datadog-agent
 
+  # Trafego continuo (1 req/ciclo a cada 60s) — profile: traffic
+  traffic-loop:
+    image: curlimages/curl:8.11.1
+    container_name: traffic-loop
+    profiles: ["traffic"]
+    environment:
+      BASE_URL: http://alb-app:80
+      INTERVAL_SECONDS: ${TRAFFIC_INTERVAL_SECONDS:-60}
+    volumes:
+      - ./scripts/continuous-traffic.sh:/scripts/continuous-traffic.sh:ro
+    entrypoint: ["/bin/sh", "/scripts/continuous-traffic.sh"]
+    depends_on:
+      - alb-app
+    networks:
+      - movida-net
+    restart: unless-stopped
+
+  # Trafego agressivo (legado) — profile: loadgen
   loadgen:
     image: curlimages/curl:8.11.1
     container_name: loadgen
