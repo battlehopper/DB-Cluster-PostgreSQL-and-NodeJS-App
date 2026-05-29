@@ -81,7 +81,7 @@ services:
       com.datadoghq.tags.service: ${DD_SERVICE_PG_REPLICA:-movida-pg-replica}
       com.datadoghq.ad.logs: '[{"source":"postgresql","service":"movida-pg-replica"}]'
 
-  # HAProxy = endpoint unico do cluster (nome UST para DBM correlacionar com nos)
+  # HAProxy = LB externo (NLB) — encaminha para o PostgreSQL Router
   haproxy-db:
     image: haproxy:2.9-alpine
     container_name: haproxy-db
@@ -92,8 +92,8 @@ services:
       - "${DB_LB_PORT:-5432}:5432"
       - "${DB_READ_LB_PORT:-5433}:5433"
     depends_on:
-      pg-primary:
-        condition: service_healthy
+      pg-router:
+        condition: service_started
     networks:
       - movida-net
     healthcheck:
@@ -105,6 +105,33 @@ services:
       <<: *ust-labels
       com.datadoghq.tags.service: ${DD_SERVICE_PG_LB:-movida-pg-haproxy}
       com.datadoghq.ad.logs: '[{"source":"haproxy","service":"movida-pg-haproxy"}]'
+
+  # PostgreSQL Router — portas 6446 (escrita) / 6447 (leitura), conceito MySQL Router / SPQR
+  pg-router:
+    image: haproxy:2.9-alpine
+    container_name: pg-router
+    hostname: pg-router
+    volumes:
+      - ./pg-router/haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
+    ports:
+      - "${PG_ROUTER_WRITE_PORT:-6446}:6446"
+      - "${PG_ROUTER_READ_PORT:-6447}:6447"
+    depends_on:
+      pg-primary:
+        condition: service_healthy
+      pg-replica:
+        condition: service_healthy
+    networks:
+      - movida-net
+    healthcheck:
+      test: ["CMD", "haproxy", "-c", "-f", "/usr/local/etc/haproxy/haproxy.cfg"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    labels:
+      <<: *ust-labels
+      com.datadoghq.tags.service: ${DD_SERVICE_PG_ROUTER:-movida-pg-router}
+      com.datadoghq.ad.logs: '[{"source":"haproxy","service":"movida-pg-router"}]'
 
   # --- Camada de Aplicacao (Node.js) ---
   api-1:
@@ -119,9 +146,11 @@ services:
       <<: *ust-env
       INSTANCE_ID: api-1
       PORT: 3000
-      # Aplicacao conecta via Load Balancer (cenario Movida) — mesmo caminho do trafego real
+      # APP -> LB externo -> Router (6446 escrita) -> PRIMARY
       PGHOST: haproxy-db
       PGPORT: 5432
+      PGHOST_READ: pg-router
+      PGPORT_READ: 6447
       PGDATABASE: movida
       PGUSER: movida_app
       PGPASSWORD: ${APP_DB_PASSWORD:-movida_secret}
@@ -132,7 +161,7 @@ services:
       DD_RUNTIME_METRICS_ENABLED: "true"
       DD_PROFILING_ENABLED: ${DD_PROFILING_ENABLED:-false}
       DD_DBM_PROPAGATION_MODE: full
-      DD_TAGS: "app_instance:api-1,db_load_balancer:${DD_SERVICE_PG_LB:-movida-pg-haproxy},db_cluster:movida-pg"
+      DD_TAGS: "app_instance:api-1,db_load_balancer:${DD_SERVICE_PG_LB:-movida-pg-haproxy},db_router:${DD_SERVICE_PG_ROUTER:-movida-pg-router},db_cluster:movida-pg"
     depends_on:
       haproxy-db:
         condition: service_started
@@ -156,7 +185,7 @@ services:
     environment:
       <<: *api_env
       INSTANCE_ID: api-2
-      DD_TAGS: "app_instance:api-2,db_load_balancer:${DD_SERVICE_PG_LB:-movida-pg-haproxy},db_cluster:movida-pg"
+      DD_TAGS: "app_instance:api-2,db_load_balancer:${DD_SERVICE_PG_LB:-movida-pg-haproxy},db_router:${DD_SERVICE_PG_ROUTER:-movida-pg-router},db_cluster:movida-pg"
     depends_on:
       haproxy-db:
         condition: service_started
@@ -218,6 +247,7 @@ services:
       DD_SERVICE_PG_PRIMARY: ${DD_SERVICE_PG_PRIMARY:-movida-pg-primary}
       DD_SERVICE_PG_REPLICA: ${DD_SERVICE_PG_REPLICA:-movida-pg-replica}
       DD_SERVICE_PG_LB: ${DD_SERVICE_PG_LB:-movida-pg-haproxy}
+      DD_SERVICE_PG_ROUTER: ${DD_SERVICE_PG_ROUTER:-movida-pg-router}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - /proc/:/host/proc/:ro

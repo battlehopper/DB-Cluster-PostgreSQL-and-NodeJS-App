@@ -23,7 +23,18 @@ docker exec pg-primary psql -U postgres -d movida -c "SHOW shared_preload_librar
 echo "==> 4/6 Criando extensao no primary (replica herda via catalogo)..."
 docker exec pg-primary psql -U postgres -d movida -c "CREATE EXTENSION IF NOT EXISTS pg_stat_statements;"
 
-echo "==> 5/7 Validando extensao e preload nos dois nos..."
+echo "==> 5/8 Validando via ROUTER :6446 (DBM movida-pg-router)..."
+if ! docker exec pg-primary psql -h pg-router -p 6446 -U postgres -d movida -c \
+  "SELECT count(*) AS via_router_write FROM pg_stat_statements;"; then
+  echo "ERRO: pg_stat_statements indisponivel via pg-router:6446"
+  exit 1
+fi
+
+echo "==> 5b/8 Validando via LB externo (caminho completo da APP)..."
+docker exec pg-primary psql -h haproxy-db -p 5432 -U postgres -d movida -c \
+  "SELECT count(*) AS via_lb FROM pg_stat_statements;" || true
+
+echo "==> 6/8 Validando nos diretamente..."
 docker exec pg-primary psql -U postgres -d movida -c "SHOW shared_preload_libraries;"
 docker exec pg-replica psql -U postgres -d movida -c "SHOW shared_preload_libraries;"
 docker exec pg-primary psql -U postgres -d movida -c \
@@ -42,12 +53,12 @@ done
 echo "==> Statements capturados no primary:"
 docker exec pg-primary psql -U postgres -d movida -c "SELECT count(*) AS total FROM pg_stat_statements;"
 
-echo "==> 6/7 Grants DBM (vacuum/wraparound) no primary..."
+echo "==> 7/8 Grants DBM (vacuum/wraparound) no primary..."
 docker exec pg-primary psql -U postgres -d movida -c "GRANT pg_monitor TO movida_app;" 2>/dev/null || true
 docker exec pg-primary psql -U postgres -d postgres -c "GRANT pg_monitor TO movida_app;" 2>/dev/null || true
 
-echo "==> 7/7 Reiniciando Datadog Agent..."
-./scripts/compose.sh restart datadog-agent
+echo "==> 8/8 Reiniciando stack DB + Agent..."
+./scripts/compose.sh restart pg-router haproxy-db pg-primary datadog-agent
 
 echo ""
 echo "Concluido. Aguarde 2-5 min no DBM (us5) e atualize Setup Issues."

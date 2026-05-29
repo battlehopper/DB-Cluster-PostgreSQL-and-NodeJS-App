@@ -11,32 +11,32 @@ Repositório: [github.com/battlehopper/DB-Cluster-PostgreSQL-and-NodeJS-App](htt
 ```text
                          ┌─────────────────────┐
                          │   Datadog Agent     │
-                         │ APM + Logs + PG DB  │
                          └──────────┬──────────┘
-                                    │ coleta
+                                    │
 ┌──────────────┐    HTTP :8080      │      ┌─────────────┐
-│   Cliente    │ ───────────────►   │      │  api-1      │
-│  (curl/ALB)  │      alb-app       ├─────►│  api-2      │
-└──────────────┘    (nginx ALB)     │      └──────┬──────┘
-                                    │             │ PG via haproxy-db:5432
+│   Cliente    │ ───────────────►   │      │  api-1/2    │
+└──────────────┘      alb-app      │      └──────┬──────┘
+                                    │             │ PG :5432
                                     │      ┌──────▼──────┐
-                                    │      │ haproxy-db  │  ← NLB/ALB TCP (PostgreSQL)
+                                    │      │ haproxy-db  │  LB externo (NLB)
+                                    │      └──────┬──────┘
+                                    │      ┌──────▼──────┐
+                                    │      │  pg-router  │  Router PG
+                                    │      │ 6446 write  │  (conceito SPQR /
+                                    │      │ 6447 read   │   MySQL Router)
                                     │      └──────┬──────┘
                                     │    ┌────────┴────────┐
                                     │    │                 │
                                     │ pg-primary      pg-replica
-                                    │  (write)         (read standby)
+                                    │  (PRIMARY)       (SECONDARY)
 ```
 
-| Componente | Papel no lab | Equivalente AWS (cliente Movida) |
-|------------|--------------|----------------------------------|
-| `alb-app` (nginx) | Balanceamento HTTP das APIs | **Application Load Balancer** |
-| `haproxy-db` | Endpoint único PostgreSQL (write/read) | **NLB** ou proxy TCP na frente do cluster |
-| `pg-primary` / `pg-replica` | Cluster com replicação streaming | RDS/Aurora PostgreSQL ou EC2 cluster |
-| `api-1` / `api-2` | Microserviços Node.js | ECS/EKS/EC2 apps |
-| `datadog-agent` | Métricas, logs, APM, checks PostgreSQL | Agent na EC2 ou DaemonSet |
-
-> **Nota:** ALB real é camada 7 (HTTP). Para PostgreSQL em produção costuma-se usar **NLB**, **RDS Proxy** ou **PgBouncer**. Neste lab, `haproxy-db` representa o **endpoint único** que as apps usam para falar com o cluster — o padrão observado em clientes enterprise.
+| Componente | Papel no lab | Equivalente Movida |
+|------------|--------------|-------------------|
+| `alb-app` | ALB HTTP das APIs | Application Load Balancer |
+| `haproxy-db` | LB TCP externo | NLB (`10.220.10.10`) |
+| `pg-router` | Router escrita/leitura | MySQL Router / [SPQR](https://www.postgresql.org/about/news/stateless-postgres-query-router-100-released-2759/) |
+| `pg-primary` / `pg-replica` | Cluster PostgreSQL | DB-02 PRIMARY / DB-01,03 SECONDARY |
 
 ---
 
@@ -44,9 +44,10 @@ Repositório: [github.com/battlehopper/DB-Cluster-PostgreSQL-and-NodeJS-App](htt
 
 | Container | Imagem | Porta (host) |
 |-----------|--------|--------------|
+| `haproxy-db` | haproxy:2.9 | 5432 (LB), 5433 (LB read) |
+| `pg-router` | haproxy:2.9 | **6446** (write), **6447** (read) |
 | `pg-primary` | postgres:16-alpine | interna |
 | `pg-replica` | build local | interna |
-| `haproxy-db` | haproxy:2.9 | 5432 (write), 5433 (read) |
 | `api-1`, `api-2` | build local (Node 20) | interna |
 | `alb-app` | nginx:1.27 | **8080** |
 | `datadog-agent` | agent:7 | 8126 (APM), 8125 (DogStatsD) |
@@ -156,14 +157,15 @@ Seguimos a [documentação oficial de UST](https://docs.datadoghq.com/getting_st
 | Componente | `service` (UST) | Papel no DBM |
 |------------|-----------------|--------------|
 | `movida-reservas-api` | API Node (APM) | Origem das queries; `DD_DBM_PROPAGATION_MODE=full` |
-| `movida-pg-haproxy` | HAProxy (LB do banco) | **Endpoint das apps** (`PGHOST=haproxy-db`) — Queries, Schema, Calling Services |
-| `movida-pg-primary` | PostgreSQL primary | Nó writer — replication lag e saúde do cluster |
-| `movida-pg-replica` | PostgreSQL replica | Nó standby — saúde da réplica |
+| `movida-pg-haproxy` | LB externo (NLB) | Entrada da app (`PGHOST=haproxy-db`) |
+| `movida-pg-router` | PostgreSQL Router | **Queries, Schema, Calling Services** (`:6446` write / `:6447` read) |
+| `movida-pg-primary` | PostgreSQL primary | Vacuum, replication lag |
+| `movida-pg-replica` | PostgreSQL replica | Saúde standby |
 | `movida-app-alb` | Nginx (ALB HTTP) | LB da camada de aplicação |
 
-Cada container expõe **labels Docker** (`com.datadoghq.tags.*`) e, onde aplicável, variáveis `DD_ENV` / `DD_SERVICE` / `DD_VERSION`. Os checks PostgreSQL usam `dbm: true`, `reported_hostname` e a tag **`db_load_balancer:movida-pg-haproxy`** para o DBM correlacionar o endpoint do LB com cada nó do cluster.
+Tags de correlação: `db_load_balancer`, `db_router`, `db_cluster`, `db_node`.
 
-Personalize os nomes em `.env` (`DD_SERVICE_PG_LB`, `DD_SERVICE_PG_PRIMARY`, etc.).
+Personalize em `.env`: `DD_SERVICE_PG_LB`, `DD_SERVICE_PG_ROUTER`, `DD_SERVICE_PG_PRIMARY`, etc.
 
 ---
 
@@ -179,23 +181,23 @@ Personalize os nomes em `.env` (`DD_SERVICE_PG_LB`, `DD_SERVICE_PG_PRIMARY`, etc
 
 | Onde no DBM (us5) | Host | O que ver |
 |-------------------|------|-----------|
-| Queries, Schema, Calling Services (via LB) | **movida-pg-haproxy** | Tráfego da API (`PGHOST=haproxy-db`) |
-| Calling Services (também pode aparecer) | **movida-pg-primary** | Queries executam no nó writer |
-| Vacuums / wraparound | **movida-pg-primary** | Saúde operacional do nó |
-| Replication lag | **movida-pg-primary** | Custom metric |
-| Standby | **movida-pg-replica** | Sem Calling Services (esperado) |
+| LB externo | **movida-pg-haproxy** | Camada NLB (entrada da app) |
+| **Queries, Schema, Calling Services** | **movida-pg-router** | Router escrita `:6446` |
+| Router leitura | **movida-pg-router-read** | Router leitura `:6447` |
+| Vacuums / replication | **movida-pg-primary** | Nó writer |
+| Standby | **movida-pg-replica** | Réplica |
 - Em **APM → Traces**, use **View in DBM** no host do load balancer
 
 ### Schema Explorer + Calling Services
 
 | Recurso | Requisito | Onde ver |
 |---------|-----------|----------|
-| **Schema** | Agent **7.54+** + `collect_schemas.enabled: true` | DBM → **movida-pg-primary** → Schema |
-| **Calling Services** | Apps em `PGHOST=haproxy-db` + DBM no host **`movida-pg-haproxy`** + `DD_DBM_PROPAGATION_MODE=full` + `queryMode: simple` | DBM → host do **LB**, não no primary |
+| **Schema** | Agent **7.54+** + `collect_schemas` no router | DBM → **movida-pg-router** |
+| **Calling Services** | `PGHOST=haproxy-db` + DBM em **movida-pg-router** (`:6446`) | Propagação APM `full` |
 
-> **Arquitetura Movida:** a API **nunca** conecta pelo nome `pg-primary`; usa o **endpoint do load balancer**. O Agent coleta DBM nesse endpoint (`haproxy-db` / `movida-pg-haproxy`) e monitora os nós (`pg-primary`, `pg-replica`) separadamente para replication/cluster.
+> **Fluxo:** `APP → haproxy-db → pg-router:6446 → pg-primary`. O DBM monitora cada camada com UST distinto.
 
-> **Nota:** `pg_stat_statements` pode normalizar comentários `dddbs`/`ddps`; use o script `verify-dbm-apm-link.sh` e o UI em **movida-pg-haproxy**.
+> **Nota:** Em produção Movida o router pode ser [SPQR](https://www.postgresql.org/about/news/stateless-postgres-query-router-100-released-2759/), PgBouncer ou MySQL Router equivalente; no lab usamos HAProxy nas portas **6446/6447**.
 
 Após `git pull` e rebuild:
 

@@ -1,7 +1,7 @@
 init_config:
 
 instances:
-  # Endpoint que a APLICACAO usa (via Load Balancer TCP) — Queries, Schema, Calling Services
+  # ── LB externo (APP -> haproxy-db:5432) ──
   - host: haproxy-db
     port: 5432
     username: "%%env_POSTGRES_USER%%"
@@ -9,23 +9,74 @@ instances:
     dbname: movida
     reported_hostname: "%%env_DD_SERVICE_PG_LB%%"
     dbm: true
+    query_metrics:
+      enabled: false
+    query_samples:
+      enabled: false
     collect_schemas:
-      enabled: true
+      enabled: false
     tags:
       - "env:%%env_DD_ENV%%"
       - "service:%%env_DD_SERVICE_PG_LB%%"
       - "version:%%env_DD_VERSION%%"
       - "cluster:movida-pg"
       - "db_cluster:movida-pg"
-      - "db_role:load_balancer_endpoint"
+      - "db_role:load_balancer"
       - "db_load_balancer:%%env_DD_SERVICE_PG_LB%%"
+      - "db_router:%%env_DD_SERVICE_PG_ROUTER%%"
+
+  # ── Router ESCRITA :6446 (onde as queries da app sao roteadas ao PRIMARY) ──
+  - host: pg-router
+    port: 6446
+    username: "%%env_POSTGRES_USER%%"
+    password: "%%env_POSTGRES_PASSWORD%%"
+    dbname: movida
+    reported_hostname: "%%env_DD_SERVICE_PG_ROUTER%%"
+    dbm: true
+    collect_schemas:
+      enabled: true
+    tags:
+      - "env:%%env_DD_ENV%%"
+      - "service:%%env_DD_SERVICE_PG_ROUTER%%"
+      - "version:%%env_DD_VERSION%%"
+      - "cluster:movida-pg"
+      - "db_cluster:movida-pg"
+      - "db_role:router_write"
+      - "db_router_port:6446"
+      - "db_load_balancer:%%env_DD_SERVICE_PG_LB%%"
+      - "db_router:%%env_DD_SERVICE_PG_ROUTER%%"
     relations:
       - relation_regex: '.*'
         relkind:
           - r
           - i
 
-  # No PRIMARY — vacuum/wraparound + replication (sem duplicar queries do endpoint LB)
+  # ── Router LEITURA :6447 (rota read -> primary + replica) ──
+  - host: pg-router
+    port: 6447
+    username: "%%env_POSTGRES_USER%%"
+    password: "%%env_POSTGRES_PASSWORD%%"
+    dbname: movida
+    reported_hostname: "%%env_DD_SERVICE_PG_ROUTER%%-read"
+    dbm: true
+    query_metrics:
+      enabled: false
+    query_samples:
+      enabled: false
+    collect_schemas:
+      enabled: false
+    tags:
+      - "env:%%env_DD_ENV%%"
+      - "service:%%env_DD_SERVICE_PG_ROUTER%%"
+      - "version:%%env_DD_VERSION%%"
+      - "cluster:movida-pg"
+      - "db_cluster:movida-pg"
+      - "db_role:router_read"
+      - "db_router_port:6447"
+      - "db_load_balancer:%%env_DD_SERVICE_PG_LB%%"
+      - "db_router:%%env_DD_SERVICE_PG_ROUTER%%"
+
+  # ── No PRIMARY (DB-02 no diagrama) ──
   - host: pg-primary
     port: 5432
     username: "%%env_POSTGRES_USER%%"
@@ -53,6 +104,7 @@ instances:
       - "db_node:primary"
       - "db_role:writer"
       - "db_load_balancer:%%env_DD_SERVICE_PG_LB%%"
+      - "db_router:%%env_DD_SERVICE_PG_ROUTER%%"
     custom_queries:
       - metric_suffix: replication.lag_bytes
         query: SELECT COALESCE(pg_wal_lsn_diff(pg_current_wal_lsn(), replay_lsn), 0) AS lag FROM pg_stat_replication LIMIT 1;
@@ -62,7 +114,7 @@ instances:
         tags:
           - query:replication_lag
 
-  # No REPLICA — saude do standby
+  # ── No REPLICA / SECONDARY (DB-01/DB-03 no diagrama) ──
   - host: pg-replica
     port: 5432
     username: "%%env_POSTGRES_USER%%"
@@ -79,3 +131,4 @@ instances:
       - "db_node:replica"
       - "db_role:reader"
       - "db_load_balancer:%%env_DD_SERVICE_PG_LB%%"
+      - "db_router:%%env_DD_SERVICE_PG_ROUTER%%"
